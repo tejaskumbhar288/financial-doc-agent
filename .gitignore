@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+# (uv.lock should be committed for reproducibility — do NOT ignore it)
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Data (avoid committing large/PII sample data)
+app/data/*
+!app/data/.gitkeep
+
+# Logs
+*.log
+
+# Distribution / build
+build/
+dist/
+*.egg-info/
