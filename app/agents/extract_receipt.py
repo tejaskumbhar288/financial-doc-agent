@@ -20,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 from app.schemas.receipt import ReceiptExtraction
 
 MODEL = "llama3.2:3b"
+MAX_RETRIES = 2  # 2 retries = 3 attempts total, per Architecture doc Section 9
 
 
 class ReceiptContentRaw(BaseModel):
@@ -53,6 +54,55 @@ MEMBER:
 CASH BILL
 TOTAL: 9.00
 """
+
+
+def _describe_validation_error(exc: ValidationError) -> str:
+    """
+    Turns a pydantic ValidationError into a short, LLM-readable failure
+    reason — e.g. "total: could not parse 'nine dollars' as Decimal".
+    This is what gets threaded back in as prior_failure_context (Section 10's
+    short-term/in-loop memory) — without it, a retry is just re-asking the
+    same question with no new information.
+    """
+    parts = []
+    for err in exc.errors():
+        field = ".".join(str(loc) for loc in err["loc"])
+        parts.append(f"{field}: {err['msg']}")
+    return "; ".join(parts)
+
+
+def extract_receipt_with_retry(source_filename: str) -> tuple[ReceiptExtraction | None, str]:
+    """
+    Extraction with the self-check/retry loop from Architecture doc Section 9.
+
+    Returns (result, status):
+      - (ReceiptExtraction, "processed")       on success
+      - (None, "needs_human_review")           if all attempts fail
+
+    Every attempt is logged (attempt number, failure reason if any) — the
+    audit trail requirement. For now this is just print(); Checkpoint 5+
+    (Postgres) replaces this with a real review_queue / audit log table.
+    """
+    prior_failure_context: str | None = None
+
+    for attempt in range(1, MAX_RETRIES + 2):  # +2: 1-indexed, inclusive of final attempt
+        print(f"[extract_receipt] attempt {attempt}/{MAX_RETRIES + 1} "
+              f"(source_filename={source_filename})")
+
+        try:
+            content = _call_llm(prior_failure_context)
+            result = _to_receipt_extraction(content, source_filename)
+        except ValidationError as exc:
+            failure_reason = _describe_validation_error(exc)
+            print(f"[extract_receipt] attempt {attempt} FAILED: {failure_reason}")
+            prior_failure_context = failure_reason
+            continue
+
+        print(f"[extract_receipt] attempt {attempt} SUCCEEDED")
+        return result, "processed"
+
+    print(f"[extract_receipt] all {MAX_RETRIES + 1} attempts exhausted — needs_human_review")
+    return None, "needs_human_review"
 
 
 def _build_prompt(prior_failure_context: str | None = None) -> str:
@@ -121,6 +171,12 @@ def extract_receipt(source_filename: str) -> ReceiptExtraction:
 
 
 if __name__ == "__main__":
-    result = extract_receipt(source_filename="X00016469612.jpg")
-    print("\n--- Validated ReceiptExtraction ---")
-    print(result.model_dump_json(indent=2))
+    result, status = extract_receipt_with_retry(source_filename="X00016469612.jpg")
+
+    print("\n--- Retry loop result ---")
+    print(f"status: {status}")
+
+    if result is not None:
+        print(result.model_dump_json(indent=2))
+    else:
+        print("No valid extraction — flagged for human review.")
