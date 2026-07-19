@@ -1,5 +1,6 @@
 """
 Checkpoint 2: first real LLM extraction call.
+Checkpoint 3: self-check/retry loop around it.
 
 Design note: Ollama's JSON-schema-constrained decoding converts your schema
 into a GBNF grammar under the hood — this is much more limited than full
@@ -14,7 +15,7 @@ in the same way with cloud providers' proper tool-calling APIs.
 """
 
 import ollama
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.schemas.receipt import ReceiptExtraction
 
@@ -53,10 +54,26 @@ CASH BILL
 TOTAL: 9.00
 """
 
-EXTRACTION_PROMPT = f"""You are extracting structured data from a scanned receipt's raw OCR text.
+
+def _build_prompt(prior_failure_context: str | None = None) -> str:
+    """
+    Builds the extraction prompt. If a previous attempt failed validation,
+    prior_failure_context carries the specific reason back in — this is
+    the "short-term/in-loop memory" mechanism from Architecture doc
+    Section 10: it's what makes a retry an actual second attempt instead
+    of just re-asking the same question and hoping for a different answer.
+    """
+    retry_note = ""
+    if prior_failure_context:
+        retry_note = f"""
+Your previous attempt had a problem: {prior_failure_context}
+Please correct this in your new extraction.
+"""
+
+    return f"""You are extracting structured data from a scanned receipt's raw OCR text.
 The OCR text is messy and may have spacing/formatting errors — infer the correct values.
 If a field is genuinely not present, use an empty string "".
-
+{retry_note}
 Receipt OCR text:
 ---
 {RAW_RECEIPT_TEXT}
@@ -67,21 +84,25 @@ total, document number, and cashier.
 """
 
 
-def extract_receipt(source_filename: str) -> ReceiptExtraction:
+def _call_llm(prior_failure_context: str | None = None) -> ReceiptContentRaw:
+    """Single LLM call. Raises nothing itself beyond what ollama/pydantic raise natively."""
+    prompt = _build_prompt(prior_failure_context)
     response = ollama.chat(
         model=MODEL,
-        messages=[{"role": "user", "content": EXTRACTION_PROMPT}],
+        messages=[{"role": "user", "content": prompt}],
         format=ReceiptContentRaw.model_json_schema(),
     )
-
     raw_json = response["message"]["content"]
-    print("--- Raw LLM output ---")
-    print(raw_json)
-    print("----------------------")
+    return ReceiptContentRaw.model_validate_json(raw_json)
 
-    content = ReceiptContentRaw.model_validate_json(raw_json)
 
-    receipt = ReceiptExtraction(
+def _to_receipt_extraction(content: ReceiptContentRaw, source_filename: str) -> ReceiptExtraction:
+    """
+    The validation boundary. This is what can raise pydantic.ValidationError
+    if the LLM's string output doesn't actually coerce (e.g. bad date format,
+    non-numeric total) — exactly the failure the retry loop is built to catch.
+    """
+    return ReceiptExtraction(
         source_filename=source_filename,
         confidence_score=0.9,
         merchant_name=content.merchant_name,
@@ -91,7 +112,12 @@ def extract_receipt(source_filename: str) -> ReceiptExtraction:
         document_number=content.document_number or None,
         cashier=content.cashier or None,
     )
-    return receipt
+
+
+def extract_receipt(source_filename: str) -> ReceiptExtraction:
+    """Single-attempt extraction, no retry. Kept for Checkpoint 2 compatibility."""
+    content = _call_llm()
+    return _to_receipt_extraction(content, source_filename)
 
 
 if __name__ == "__main__":
