@@ -10,9 +10,6 @@ __pycache__/
 venv/
 env/
 
-# uv
-# (uv.lock should be committed for reproducibility — do NOT ignore it)
-
 # Environment variables / secrets
 .env
 .env.*
@@ -34,9 +31,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Data (avoid committing large/PII sample data)
-app/data/*
-!app/data/.gitkeep
+# Sample/downloaded documents (avoid committing large/PII data)
+# Code inside app/data/ (like generators) is NOT ignored — only this
+# dedicated samples subfolder is.
+app/data/samples/*
+!app/data/samples/.gitkeep
 
 # Logs
 *.log
