@@ -5,7 +5,7 @@
 > Re-upload this file to Project knowledge whenever it changes, so any new
 > chat has full context without re-explaining everything from scratch.
 >
-> Last updated: Checkpoint 2 complete (tagged v0.2.0)
+> Last updated: Checkpoint 3 complete (tagged v0.3.0)
 
 ---
 
@@ -92,14 +92,58 @@ invented by the LLM.
 
 ---
 
-## Checkpoint 3 — Self-Check/Retry Loop — ⬜ NOT STARTED
+## Checkpoint 3 — Self-Check/Retry Loop — ✅ COMPLETE
 
-Plan: wrap `extract_receipt()` in the retry loop shape from Architecture
-doc Section 9 — catch `ValidationError`, extract structured failure info
-via `.errors()`, feed back as `prior_failure_context` into the next LLM
-attempt, up to `MAX_RETRIES` (2 retries / 3 attempts total for Extraction
-Agent per Section 9's table), fall back to `needs_human_review` status
-after that.
+**What works:** `extract_receipt_with_retry()` in `app/agents/extract_receipt.py`
+wraps extraction in the retry loop from Architecture doc Section 9. On
+`ValidationError`, the failure is converted to a readable message via
+Pydantic's `.errors()` (e.g. `"transaction_date: Input should be a valid
+date..."`) and threaded back into the next attempt's prompt as
+`prior_failure_context` — the short-term/in-loop memory mechanism from
+Section 10. Capped at `MAX_RETRIES = 2` (3 attempts total, per Section 9's
+table for the Extraction Agent). All attempts are logged via `print()`
+(attempt number, success/failure, reason) — a stand-in for the real
+Postgres audit trail / `review_queue` table, which lands in Checkpoint 5+.
+Returns `(ReceiptExtraction | None, status)` rather than raising, matching
+the `processed | needs_review | unreconciled` status enum already defined
+in `base.py`.
+
+Refactored `extract_receipt.py` into three pieces first (own commit, no
+behavior change) so the retry loop's diff stayed readable:
+- `_call_llm(prior_failure_context)` — LLM call only
+- `_to_receipt_extraction(content, source_filename)` — Pydantic
+  construction/validation only (the piece that can raise)
+- `_build_prompt(prior_failure_context)` — prompt assembly, with a
+  "your previous attempt had a problem: ..." block injected on retry
+
+**Tested manually (no automated tests yet):**
+- Happy path: clean receipt text → attempt 1 succeeds, `status="processed"`
+- Failure path: corrupted the date field in `RAW_RECEIPT_TEXT` to force a
+  `ValidationError` → confirmed all 3 attempts logged individually, loop
+  exhausted cleanly, returned `(None, "needs_human_review")` with no
+  unhandled exception
+
+**Design gap discovered (deviates from naive assumption, doesn't block
+Checkpoint 3):** during failure-path testing, corrupting the date to a
+prose format ("25 December 2018") caused all 3 retries to fail with the
+*identical* error every time — the retry mechanism worked correctly, but
+retrying didn't help, because the failure wasn't the LLM extracting
+wrong data (it faithfully transcribed the OCR text each time); it was
+`ReceiptExtraction`'s `parse_dd_mm_yyyy` validator only handling
+slash-separated `DD/MM/YYYY`, per its SROIE-grounded design (see
+`receipt.py` docstring). Retry only helps when the *LLM's* extraction
+was the actual problem (hallucinated/misread fields) — not when a
+downstream parser is narrower than valid real-world input. Decision:
+leave the date parser narrow for now, since it's grounded in confirmed
+real SROIE ground-truth data, not guessed — broaden it later (e.g. with
+`dateutil.parser` as a fallback) only if/when real evidence shows other
+date formats showing up often. Flagged here rather than silently fixed.
+
+**Not yet solved:** no automated tests for the retry loop (manual testing
+only so far); `_call_llm`'s own exceptions (e.g. Ollama connection errors)
+are NOT caught by the retry loop — only `ValidationError` is, deliberately,
+since infra failures and extraction-quality failures are different
+failure classes and probably shouldn't share a retry strategy.
 
 ---
 
@@ -130,3 +174,13 @@ after that.
   deletion restricted
 - Tags so far: `v0.1.0` (Checkpoint 1 — all schemas), `v0.2.0`
   (Checkpoint 2 — first working LLM extraction)
+
+## Git Housekeeping Notes (addendum)
+
+- Discovered mid-Checkpoint-3: `PROGRESS.md` had been merged into `main`
+  (via v0.2.0) but never merged back into `development`, so a
+  freshly-pulled `development` was missing it. Fixed by pulling
+  `development`, merging `origin/main` into it, pushing, then rebasing
+  the feature branch on top. Lesson: when a docs/fix commit goes into
+  `main` directly (e.g. via a hotfix-style PR), remember to merge it back
+  into `development` too, or future feature branches silently diverge.
