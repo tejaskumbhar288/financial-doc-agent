@@ -161,6 +161,125 @@ failure classes and probably shouldn't share a retry strategy.
 
 ---
 
+## Checkpoint 4 — Guard Agent (PII/PCI Redaction) — ✅ COMPLETE
+
+**Status:** Merged `feature/guard-agent` → `development` (PR #9), currently
+in open PR `development` → `main` (PR #10). One fixup commit applied on
+top for CodeRabbit-flagged issues (see below) before that PR merges.
+
+**What works:** `app/agents/guard.py` — `redact_text(text: str) -> GuardResult`.
+Takes raw document text (pre-Extraction, per architecture doc Section 2
+step 2) and redacts PII/PCI using Presidio, returning both the redacted
+text and a findings list for the audit trail (Section 6).
+
+Entities detected/redacted:
+- `CREDIT_CARD` — Presidio built-in, Luhn-validated
+- `US_BANK_NUMBER`, `US_SSN`, `IBAN_CODE` — Presidio built-in
+- `US_ABA_ROUTING_NUMBER` — custom `PatternRecognizer`, since Presidio has
+  no built-in ABA recognizer (confirmed via manual testing — a real
+  routing number was misdetected as `PHONE_NUMBER` without it). Validated
+  with the real ABA checksum formula (`3(d1+d4+d7) + 7(d2+d5+d8) +
+  (d3+d6+d9) ≡ 0 mod 10`), not just a bare 9-digit regex — a bare regex
+  would flag any 9-digit number (invoice numbers, reference codes) as a
+  routing number.
+
+**Deliberate design decision — `PERSON` (names) NOT redacted.** Not in
+architecture doc Section 6's redaction list (that list is scoped to data
+that alone enables impersonation/fraud — account numbers, routing
+numbers, PANs, SSN/Tax ID, full addresses; a name alone doesn't). Also a
+hard functional requirement: `StatementExtraction.account_holder_name` is
+a required field the Extraction Agent must populate downstream —
+redacting names would break extraction, not improve security.
+
+**Tested (TDD, known-answer fixtures per Section 4):** `tests/test_guard.py`,
+9 tests, all passing. Covers: ABA checksum accept/reject, credit card
+redaction, ABA routing redaction, false-positive rejection (arbitrary
+9-digit numbers correctly NOT flagged as routing numbers), names staying
+visible, dynamic-length masking, audit findings never containing raw PII,
+and a combined realistic statement-text case.
+
+---
+
+**CodeRabbit review findings — 2 fixed before merge, 2 tracked as known
+gaps, 1 trivial fix applied:**
+
+1. **FIXED — Masking didn't scale with PII length.** Original
+   implementation used Presidio's built-in `"mask"` operator with a fixed
+   `chars_to_mask=12`, which only masks the *first* N characters. Worked
+   by coincidence for 16-digit credit cards (last 4 survive) but silently
+   left most of a long IBAN exposed — confirmed live: a 32-char IBAN test
+   string had 20 raw characters still visible in the "redacted" output.
+   Replaced with a custom operator (`_mask_all_but_last4`) that masks
+   relative to length, so short (9-digit routing) and long (34-char IBAN)
+   values are both handled correctly regardless of format.
+
+2. **FIXED — Audit findings stored raw PII.** `GuardFinding.original_span`
+   held the actual unredacted PAN/SSN/routing number, in an object
+   explicitly documented as feeding the audit trail (Section 6) — meaning
+   a raw PAN could end up sitting in plaintext the moment findings got
+   logged or persisted to the future `review_queue` audit tables (Section
+   9). Replaced with `masked_preview` (already-redacted) + `span_length`.
+   Regression test added: `test_findings_never_contain_raw_pii`.
+
+3. **FIXED (trivial) — Test used a real-format, Luhn-valid PAN.**
+   `4532015112830366` is Luhn-valid, which is exactly what made it a good
+   test value — but also what made a secret-scanning SAST tool
+   (OpenGrep, via GitGuardian check) flag it as a possible live card
+   number. Swapped for Stripe's well-known public test card number
+   (`4242424242424242`) — same property (Luhn-valid, so Presidio treats
+   it as a real PAN shape) but a recognized "known fake" pattern.
+
+4. **TRACKED, not fixed — full address redaction.** Architecture doc
+   Section 6 lists "full account holder addresses" in scope for
+   redaction; `guard.py` doesn't currently handle this. Confirmed via
+   earlier manual exploration that Presidio's `LOCATION` detection is
+   weak for this — it caught "Springfield" but missed "742 Evergreen
+   Terrace" (the actual street address) entirely in a test sentence. Not
+   a quick fix — needs its own investigation (likely a custom recognizer
+   or a different detection strategy), not just enabling `LOCATION`.
+   Flagged here rather than silently left unaddressed.
+
+5. **TRACKED, not fixed — spaCy model not declared as an installable
+   dependency.** Presidio's NER detection needs `en_core_web_lg`, which
+   isn't a regular pip dependency — it currently requires a manual
+   `uv run python -m spacy download en_core_web_lg` step not captured in
+   `pyproject.toml`, a Dockerfile, or CI config. Not urgent today (nothing
+   deployed yet), but will block Checkpoint 7 (Docker) and CI (GitHub
+   Actions) if not addressed before then.
+
+---
+
+**Design/scope decision — PII/PCI entities are US-format only.**
+`US_SSN`, `US_BANK_NUMBER`, `US_ABA_ROUTING_NUMBER` are all US-specific
+formats. Confirmed Presidio ships (but doesn't register by default) two
+India-specific recognizers — `InPanRecognizer` (`IN_PAN`) and
+`InAadhaarRecognizer` (`IN_AADHAAR`) — and evaluated adding them.
+**Decision: intentionally out of scope for now**, for two reasons:
+
+- Consistent with this project's data-grounding principle (Section 5) —
+  every other schema/redaction decision so far was validated against real
+  data or a real checksum formula (SROIE, the invoice Kaggle dataset, the
+  ABA checksum). There's no Kaggle-grounded Indian financial-document
+  dataset here to validate India-specific detection against, so adding it
+  now would be guessing, not grounding.
+- `InAadhaarRecognizer`'s built-in pattern is labeled `"AADHAAR (Very
+  Weak)"` in Presidio's own source — a bare `\b[0-9]{12}\b}` regex, no
+  checksum validation (Aadhaar has a real one — Verhoeff algorithm —
+  Presidio doesn't implement it). Shipping this would either false-flag
+  arbitrary 12-digit numbers or give false confidence that Indian PII is
+  actually handled, when structurally it isn't — same failure class as
+  the ABA bug this checkpoint just fixed, except knowingly this time.
+
+This project is explicitly scoped to US financial documents/compliance
+framing (matches architecture doc Section 1's AP-automation/SOX/AML
+framing already). India-specific redaction (`IN_PAN`, checksum-hardened
+`IN_AADHAAR`, IFSC bank-code format) is a documented possible extension,
+not a gap discovered by accident.
+
+**Not yet solved:** prompt-injection scanning (the other half of the
+Guard Agent per Section 2/6) — not started yet, next up for this
+checkpoint's follow-on work.
+
 ## Git Housekeeping Notes
 
 - `feature/financial-document-schema` — merged, deleted after Checkpoint 1
@@ -176,7 +295,7 @@ failure classes and probably shouldn't share a retry strategy.
   (Checkpoint 2 — first working LLM extraction)
 
 ## Git Housekeeping Notes (addendum)
-
+  
 - Discovered mid-Checkpoint-3: `PROGRESS.md` had been merged into `main`
   (via v0.2.0) but never merged back into `development`, so a
   freshly-pulled `development` was missing it. Fixed by pulling

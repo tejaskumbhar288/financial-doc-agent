@@ -108,25 +108,52 @@ def _build_analyzer() -> AnalyzerEngine:
 _analyzer = _build_analyzer()
 _anonymizer = AnonymizerEngine()
 
+def _mask_all_but_last4(value: str) -> str:
+    """
+    Masks everything except the last 4 characters, regardless of length.
+
+    NOTE: a fixed chars_to_mask count (e.g. Presidio's built-in "mask"
+    operator with chars_to_mask=12) does NOT scale -- it only masks the
+    first N characters, so anything longer than N stays fully exposed.
+    Confirmed via manual testing: a 32-char IBAN with chars_to_mask=12
+    left 20 raw characters visible in the "redacted" output. This custom
+    operator masks relative to length instead, so short (9-digit routing)
+    and long (34-char IBAN) values are both handled correctly.
+    """
+    if len(value) <= 4:
+        return "*" * len(value)
+    return "*" * (len(value) - 4) + value[-4:]
+
+
 # All redacted entities get the same partial-mask treatment: mask
-# everything except the last few characters. This matches what
+# everything except the last 4 characters. This matches what
 # StatementExtraction already expects (account_number_redacted like
 # "****1234") -- see app/schemas/statement.py.
 _OPERATORS = {
-    entity: OperatorConfig(
-        "mask", {"masking_char": "*", "chars_to_mask": 12, "from_end": False}
-    )
+    entity: OperatorConfig("custom", {"lambda": _mask_all_but_last4})
     for entity in REDACT_ENTITIES
 }
 
 
 @dataclass
 class GuardFinding:
-    """One redaction decision -- feeds the audit trail (Section 6)."""
+    """
+    One redaction decision -- feeds the audit trail (Section 6).
+
+    Deliberately does NOT store the raw original span. Storing raw PII
+    in an object explicitly meant for audit logging/persistence would
+    reintroduce the exact leak the Guard Agent exists to prevent -- if
+    these findings are ever logged or written to the review_queue /
+    audit tables (Section 9), a raw PAN/SSN/routing number would end up
+    sitting in plaintext in the audit trail itself. masked_preview gives
+    enough to confirm what was found and roughly where, without holding
+    the sensitive value anywhere past this function call.
+    """
 
     entity_type: str
     score: float
-    original_span: str
+    masked_preview: str
+    span_length: int
 
 
 @dataclass
@@ -154,7 +181,8 @@ def redact_text(text: str) -> GuardResult:
         GuardFinding(
             entity_type=r.entity_type,
             score=r.score,
-            original_span=text[r.start : r.end],
+            masked_preview=_mask_all_but_last4(text[r.start : r.end]),
+            span_length=r.end - r.start,
         )
         for r in results
     ]
