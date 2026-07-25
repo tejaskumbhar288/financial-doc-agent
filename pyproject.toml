@@ -6,10 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ollama>=0.6.2",
+    "presidio-analyzer>=2.2.364",
+    "presidio-anonymizer>=2.2.364",
     "pydantic>=2.13.4",
 ]
 
 [dependency-groups]
 dev = [
     "faker>=40.31.0",
+    "pytest>=9.1.1",
 ]
