@@ -44,3 +44,7 @@ app/data/samples/*
 build/
 dist/
 *.egg-info/
+
+# Local Claude Code context (personal design docs, not for git)
+/CLAUDE.md
+/context/

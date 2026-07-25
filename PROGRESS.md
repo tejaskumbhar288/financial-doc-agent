@@ -2,10 +2,11 @@
 
 > **Purpose:** This file tracks actual build progress, git state, and any
 > decisions/loopholes discovered that update or deviate from ARCHITECTURE.md.
-> Re-upload this file to Project knowledge whenever it changes, so any new
-> chat has full context without re-explaining everything from scratch.
+> Read fresh from GitHub at the start of every session (see
+> context/instructions.md) — no longer maintained as a Project knowledge
+> upload.
 >
-> Last updated: Checkpoint 3 complete (tagged v0.3.0)
+> Last updated: Checkpoint 6 complete
 
 ---
 
@@ -376,6 +377,58 @@ validate against, not a guess.
 - Only tested against hand-written samples, not a real adversarial/red-
   team style dataset — worth flagging as a limitation for anyone
   reviewing this project, not a "solved and complete" security control
+
+---
+
+## Checkpoint 6 — Unified Guard Agent Entry Point — ✅ COMPLETE
+
+**What works:** `app/agents/guard_agent.py` — `run_guard(text: str) ->
+GuardAgentResult`, the single Guard Agent entry point Architecture doc
+Section 2 step 2 describes ("Guard — PII/PCI redaction + prompt-injection
+scan" is listed as one pipeline stage, not two). Composes the two
+already-existing, independently-tested modules — `guard.py`'s
+`redact_text()` and `injection_scan.py`'s `scan_for_injection()` — rather
+than merging their internals, so each stays separately unit-testable.
+
+**Design decision — redact before scan, not the reverse.**
+`injection_scan.py`'s second layer (`injection_llm_judge.py`) makes a
+local LLM call. The entire reason Guard exists is to keep raw PII from
+reaching any LLM before Extraction — but the injection-scan's own
+LLM-judge is itself an LLM call. Scanning raw text first would mean
+unredacted PII briefly reaches that local LLM-judge before redaction
+happens. `run_guard()` redacts first, then scans the already-redacted
+text, closing that gap. `GuardAgentResult` holds both sub-results
+(`guard_result: GuardResult`, `injection_scan_result: InjectionScanResult`)
+rather than flattening their fields onto one object — the same
+composition pattern `guard.py` itself already uses for
+`GuardResult`/`GuardFinding`.
+
+**Tested:** `tests/test_guard_agent.py`, 1 test. Redaction correctness and
+injection-detection correctness are already covered by `test_guard.py` and
+`test_injection_heuristic.py`/`test_injection_llm_judge.py` — re-testing
+either here would be redundant. The one genuinely new thing `guard_agent.py`
+introduces is the ordering guarantee itself, so the test asserts on that
+specifically: mocks `scan_for_injection` via `unittest.mock.patch`
+(patched at `app.agents.guard_agent.scan_for_injection` — the name as
+imported into `guard_agent`'s own namespace, not where it's defined in
+`injection_scan.py`, since that's where `run_guard()` actually looks the
+name up at call time) and checks the text it was called with no longer
+contains the raw PII from the input. First use of mocking in this
+codebase's test suite.
+
+**Built collaboratively, not solo** — first checkpoint built with the user
+writing the implementation directly (with design-decision guidance and
+code review from Claude) rather than Claude writing it end-to-end. Working
+style formalized in `context/instructions.md`: Claude explains concepts
+and reviews, the user writes the code, by default.
+
+**Not yet solved:**
+- No orchestration calls `run_guard()` yet — `main.py` is still a stub;
+  this becomes the Guard node once LangGraph orchestration (Build Phase 2)
+  starts
+- Same not-yet-in-CI gap as Checkpoints 4/5 (spaCy model + live Ollama
+  dependency) — `test_guard_agent.py`'s one test doesn't need either
+  (fully mocked), but the modules it wraps still do
 
 ## Git Housekeeping Notes
 
