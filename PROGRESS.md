@@ -6,7 +6,8 @@
 > context/instructions.md) — no longer maintained as a Project knowledge
 > upload.
 >
-> Last updated: Checkpoint 8 complete
+> Last updated: agentic tool-use spike complete (not promoted) — Checkpoint 9
+> (Anomaly Detection Agent) still up next
 
 ---
 
@@ -678,6 +679,137 @@ work):**
 - The graph only handles receipts — invoice/statement extraction were
   never wired in (matches the fact that `extract_receipt.py` is the only
   extraction agent that exists)
+
+## Spike — Agentic Tool-Use Experiment for Extraction — ✅ COMPLETE, NOT PROMOTED
+
+**Not a numbered checkpoint** (Checkpoint 9 stays reserved for the Anomaly
+Detection Agent, per Checkpoint 8's open items above). This is a deliberate
+detour: a question came up about whether this project's "agents" are real
+agents in the sense Claude Code is (the model plans its own steps, chooses
+tools, decides when it's done) or whether they're workflows — fixed code
+paths with an LLM call inside. Worth answering with evidence rather than
+opinion before building anything else.
+
+**What was built:** `app/experiments/agentic_extraction_poc.py` — receipt
+extraction rebuilt as a real Ollama tool-calling loop (`llama3.2:3b`,
+`tools=[...]`), NOT wired into `orchestrator.py`. Deliberately a throwaway
+spike, not production code. Sample text has a real, unfixable arithmetic
+mismatch (line items sum to 19.00, printed total says 21.00) so there's
+something genuine for the agent to catch or fail to catch.
+
+**Iteration 1 — single tool (`check_arithmetic`).** Tool *choice* was
+reliable: called it unprompted, 7/7 runs across two batches. Tool *argument*
+serialization was not: `line_item_amounts` (declared as a JSON array in the
+tool schema) came back as a JSON-encoded STRING every single run — the same
+GBNF grammar-decoding limitation Section 8a documents for structured output,
+now confirmed on tool-call arguments too. Fixed with defensive parsing in
+the tool itself (`json.loads` if a string arrives instead of a list). Once
+a real result got back to the model, it reasoned over it correctly 3/3
+times — the mechanism works once the plumbing is trustworthy.
+
+**Iteration 2 — added a second tool, `finalize_extraction`.** Its
+parameters are literally `ReceiptContentRaw` — the same flat schema
+`extract_receipt.py` already validates through — so "the model decides
+it's done" and "we get a real, checkable Pydantic object" become the same
+action. **Real finding, 3/3 runs:** given an easy path (finalize
+immediately) and a harder path (verify first), the model skipped
+`check_arithmetic` entirely and finalized directly — despite the tool's own
+description explicitly saying to verify first. Prompt instructions alone
+did not hold. The $2.00 mismatch went undetected in a result that read as
+cleanly `"status": "processed"`.
+
+**Iteration 3 — guardrail: `finalize_extraction` refuses unless
+`check_arithmetic` already ran.** This fully closed the ordering gap (4/4
+first attempts correctly rejected). But it surfaced a deeper one: the gate
+only checked that verification *happened*, not that it *passed* — 2/4 runs
+got a real `matches: False` result back and finalized anyway. The other
+2/4 got stuck fighting the tool's argument shape for the full iteration
+budget and safely fell back to `needs_human_review` — no bad data escaped
+either way, but for different reasons.
+
+**Iteration 4 — guardrail tightened: refuse unless the last
+`check_arithmetic` result was `matches: True`.** This created a genuine,
+unfixable dead end for the sample document (its numbers really don't add
+up), which made it the right test for the one question that actually
+matters for a financial agent: **would it fabricate data to escape a block
+it can't legitimately pass?** Across the batch: no. Never. It never edited
+the total or invented a tax line. Its failure modes instead were (a)
+getting stuck rejecting itself in a loop, or (b) submitting blanked fields
+(`total: ""`) — data destruction, not fabrication, and Pydantic's own
+validators reject an empty `Decimal`/date regardless, which is the retry
+loop's `ValidationError` path catching a failure mode this spike never
+anticipated. Concrete vindication of insisting Pydantic validation stays a
+hard backstop regardless of what an agent decides.
+
+**Root design flaw found in the harness, not the model:** the loop had
+exactly one terminal action — finalize successfully. A document correctly
+judged un-finalizable had no legal way to end the task. Several runs show
+the model reaching the right conclusion ("cannot finalize, numbers don't
+match") and then writing it as prose, repeatedly, because no tool existed
+to say it. **Fix:** added `flag_for_review(reason)` as a second terminal
+tool — mirrors the architecture's actual `review_queue` concept (a real
+exit for "needs a human," not a failure state). After adding it: 3/4 runs
+reached `flag_for_review` with an accurate stated reason and a clean exit;
+the 4th eventually got there after repeating itself. Every run across this
+final batch ended safely at `needs_review`. Zero bad data ever finalized
+once both guardrails were in place.
+
+**Two harness bugs found and fixed along the way (engineering, not model
+behavior):**
+- `check_arithmetic(**args)` crashed the whole process with an uncaught
+  `TypeError` twice, when the model sent argument keys that didn't match
+  the declared schema (`amounts`, `line_items`, `printed_total` instead of
+  `line_item_amounts`/`total`). A harness executing model-supplied
+  arguments can never trust them to match a function signature — wrapped
+  in `try/except TypeError`, fed back as a tool failure like any other.
+- `Decimal(a)` on a model-supplied JSON number (rather than a string)
+  expanded to `19.00000000000000000000000000` — the exact float-precision
+  problem the schemas use `Decimal` to avoid, reintroduced via tool-call
+  arguments. Fixed by going through `str()` first.
+
+**Cost verdict — the actual point of this spike.** Measured against
+`extract_receipt_with_retry()` on the same document: the agentic loop cost
+5–8 LLM calls per document (growing conversation history each turn) versus
+1–3 for the fixed retry loop, for equal or worse reliability on this task.
+The mismatch it sometimes caught is already caught, deterministically,
+for free, by Section 7's amount-mismatch anomaly rule — one line of
+Python, microseconds, zero tokens, zero hallucination risk. **For
+Extraction specifically, the agentic pattern is not cost-justified.** Tool
+*choice* was reliable; tool *argument* precision was not (a malformed
+`check_arithmetic` call in every single run, ~20 runs total); the
+deterministic gates did the actual safety work, not the model's own
+judgment — though the judgment itself was directionally sound throughout,
+and never once crossed into fabricating data under pressure.
+
+**Decision: NOT promoted.** `extract_receipt_with_retry()` stays as-is.
+The spike stays in `app/experiments/`, unwired, as a documented negative
+result rather than replacing anything. It did produce a reusable framework
+for the next time "should this be an agent" comes up — a real agent is
+justified only when the step sequence AND step count are both unknowable
+in advance, there's a real environment producing feedback that couldn't be
+predicted, and the decision genuinely can't be expressed as deterministic
+code. Checked against this architecture: Guard, Extraction, and Anomaly
+Detection's deterministic core all fail that test. **The Query Agent
+(text-to-SQL, not yet built) is the one component that clearly passes it**
+— unknowable step count, a real database returning errors that can't be
+predicted, genuine reasoning about how to fix broken SQL. That's where
+this pattern gets built for real, carrying forward concrete lessons from
+here: terminal-tool-only exits (no plain-text "done"), defensive parsing
+of model-supplied tool arguments (never trust the declared schema
+exactly), an honest-abstention exit alongside the success exit, and
+Pydantic/deterministic validation as a non-negotiable backstop no matter
+what the agent concludes.
+
+**Gaps this spike exposes in the project generally, tracked not fixed:**
+- No eval set. Every conclusion above rests on ~20 manual runs against one
+  hand-crafted document. That's a spike, not an evaluation — true of every
+  agent in this system so far, not just this one.
+- No cost instrumentation. "5–8 calls" was counted by hand from terminal
+  output, not measured. Langfuse is already in the tech stack and unbuilt;
+  this is exactly the gap it's meant to close.
+- Runaway-cost protection for any future agent is currently one hardcoded
+  `MAX_ITERATIONS` constant per loop — same open mechanism-less gap Section
+  12 already tracks for rate limiting generally.
 
 ## Git Housekeeping Notes
 
