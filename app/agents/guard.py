@@ -58,11 +58,7 @@ def is_valid_aba_checksum(routing_number: str) -> bool:
     if len(routing_number) != 9 or not routing_number.isdigit():
         return False
     d = [int(c) for c in routing_number]
-    checksum = (
-        3 * (d[0] + d[3] + d[6])
-        + 7 * (d[1] + d[4] + d[7])
-        + 1 * (d[2] + d[5] + d[8])
-    )
+    checksum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + 1 * (d[2] + d[5] + d[8])
     return checksum % 10 == 0
 
 
@@ -106,6 +102,7 @@ def _build_analyzer() -> AnalyzerEngine:
 _analyzer = _build_analyzer()
 _anonymizer = AnonymizerEngine()
 
+
 def _mask_all_but_last4(value: str) -> str:
     """
     Masks everything except the last 4 characters, regardless of length.
@@ -128,8 +125,7 @@ def _mask_all_but_last4(value: str) -> str:
 # StatementExtraction already expects (account_number_redacted like
 # "****1234") -- see app/schemas/statement.py.
 _OPERATORS = {
-    entity: OperatorConfig("custom", {"lambda": _mask_all_but_last4})
-    for entity in REDACT_ENTITIES
+    entity: OperatorConfig("custom", {"lambda": _mask_all_but_last4}) for entity in REDACT_ENTITIES
 }
 
 
@@ -185,8 +181,14 @@ def redact_text(text: str) -> GuardResult:
         for r in results
     ]
 
+    # presidio_analyzer.RecognizerResult and presidio_anonymizer's own
+    # RecognizerResult are structurally identical but distinct classes —
+    # passing analyzer results straight into anonymize() is Presidio's own
+    # documented usage pattern; their type stubs just don't reflect it.
     anonymized = _anonymizer.anonymize(
-        text=text, analyzer_results=results, operators=_OPERATORS
+        text=text,
+        analyzer_results=results,  # type: ignore[arg-type]
+        operators=_OPERATORS,
     )
 
     return GuardResult(redacted_text=anonymized.text, findings=findings)

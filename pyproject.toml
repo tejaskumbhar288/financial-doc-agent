@@ -5,6 +5,7 @@ description = "Multi-agent AI system for financial document extraction, fraud de
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "langgraph>=1.2.9",
     "ollama>=0.6.2",
     "presidio-analyzer>=2.2.364",
     "presidio-anonymizer>=2.2.364",
@@ -14,5 +15,28 @@ dependencies = [
 [dependency-groups]
 dev = [
     "faker>=40.31.0",
+    "mypy>=2.3.0",
+    "pre-commit>=4.6.1",
     "pytest>=9.1.1",
+    "ruff>=0.16.0",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E501 (line too long) is off deliberately: several files carry
+# natural-language content as string literals (LLM prompts, few-shot
+# examples, test fixture text) that reads worse artificially wrapped, and
+# the formatter doesn't rewrap string contents anyway — enforcing E501
+# there would just mean noqa comments on every long prompt line.
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+# presidio/ollama don't ship type stubs; this is the standard way to
+# avoid mypy failing on every third-party import instead of actually
+# checking our own code.
+ignore_missing_imports = true

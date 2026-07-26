@@ -1,0 +1,35 @@
+name: CI
+
+# pytest is deliberately NOT run here yet. The injection-judge tests need
+# a live Ollama instance and Presidio needs the en_core_web_lg spaCy
+# model, which isn't a declared dependency — neither exists on a GitHub
+# Actions runner. Tracked as an open item in PROGRESS.md (Checkpoint 7);
+# this workflow covers what's actually runnable in CI today.
+on:
+  pull_request:
+    branches: [main, development]
+  push:
+    branches: [main, development]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format check
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy app tests

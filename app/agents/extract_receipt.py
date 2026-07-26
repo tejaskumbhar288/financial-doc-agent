@@ -73,10 +73,17 @@ def _describe_validation_error(exc: ValidationError) -> str:
 
 
 def extract_receipt_with_retry(
+    receipt_text: str,
     source_filename: str,
 ) -> tuple[ReceiptExtraction | None, ProcessingStatus]:
     """
     Extraction with the self-check/retry loop.
+
+    receipt_text is the document text to extract from — normally the
+    Guard Agent's redacted output once this runs inside the LangGraph
+    pipeline, not a module-level constant. Threading it in as a parameter
+    (rather than the function reaching for a global) is what makes this
+    callable from a graph node with whatever text actually arrived.
 
     Returns (result, status):
       - (ReceiptExtraction, ProcessingStatus.PROCESSED)     on success
@@ -100,11 +107,13 @@ def extract_receipt_with_retry(
     prior_failure_context: str | None = None
 
     for attempt in range(1, MAX_RETRIES + 2):  # +2: 1-indexed, inclusive of final attempt
-        print(f"[extract_receipt] attempt {attempt}/{MAX_RETRIES + 1} "
-              f"(source_filename={source_filename})")
+        print(
+            f"[extract_receipt] attempt {attempt}/{MAX_RETRIES + 1} "
+            f"(source_filename={source_filename})"
+        )
 
         try:
-            content = _call_llm(prior_failure_context)
+            content = _call_llm(receipt_text, prior_failure_context)
             result = _to_receipt_extraction(content, source_filename)
         except ValidationError as exc:
             failure_reason = _describe_validation_error(exc)
@@ -115,12 +124,14 @@ def extract_receipt_with_retry(
         print(f"[extract_receipt] attempt {attempt} SUCCEEDED")
         return result, ProcessingStatus.PROCESSED
 
-    print(f"[extract_receipt] all {MAX_RETRIES + 1} attempts exhausted — "
-          f"{ProcessingStatus.NEEDS_REVIEW.value}")
+    print(
+        f"[extract_receipt] all {MAX_RETRIES + 1} attempts exhausted — "
+        f"{ProcessingStatus.NEEDS_REVIEW.value}"
+    )
     return None, ProcessingStatus.NEEDS_REVIEW
 
 
-def _build_prompt(prior_failure_context: str | None = None) -> str:
+def _build_prompt(receipt_text: str, prior_failure_context: str | None = None) -> str:
     """
     Builds the extraction prompt. If a previous attempt failed validation,
     prior_failure_context carries the specific reason back in — this is
@@ -141,7 +152,7 @@ If a field is genuinely not present, use an empty string "".
 {retry_note}
 Receipt OCR text:
 ---
-{RAW_RECEIPT_TEXT}
+{receipt_text}
 ---
 
 Extract the receipt's merchant name, address, transaction date (keep original format as printed),
@@ -149,9 +160,9 @@ total, document number, and cashier.
 """
 
 
-def _call_llm(prior_failure_context: str | None = None) -> ReceiptContentRaw:
+def _call_llm(receipt_text: str, prior_failure_context: str | None = None) -> ReceiptContentRaw:
     """Single LLM call. Raises nothing itself beyond what ollama/pydantic raise natively."""
-    prompt = _build_prompt(prior_failure_context)
+    prompt = _build_prompt(receipt_text, prior_failure_context)
     response = ollama.chat(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -172,21 +183,26 @@ def _to_receipt_extraction(content: ReceiptContentRaw, source_filename: str) -> 
         confidence_score=0.9,
         merchant_name=content.merchant_name,
         merchant_address=content.merchant_address or None,
-        transaction_date=content.transaction_date,
-        total=content.total,
+        # str -> date/Decimal coercion happens in ReceiptExtraction's own
+        # mode="before" validators; mypy can't see that a validator widens
+        # the constructor's accepted input beyond the declared field type.
+        transaction_date=content.transaction_date,  # type: ignore[arg-type]
+        total=content.total,  # type: ignore[arg-type]
         document_number=content.document_number or None,
         cashier=content.cashier or None,
     )
 
 
-def extract_receipt(source_filename: str) -> ReceiptExtraction:
+def extract_receipt(receipt_text: str, source_filename: str) -> ReceiptExtraction:
     """Single-attempt extraction, no retry. Kept for Checkpoint 2 compatibility."""
-    content = _call_llm()
+    content = _call_llm(receipt_text)
     return _to_receipt_extraction(content, source_filename)
 
 
 if __name__ == "__main__":
-    result, status = extract_receipt_with_retry(source_filename="X00016469612.jpg")
+    result, status = extract_receipt_with_retry(
+        receipt_text=RAW_RECEIPT_TEXT, source_filename="X00016469612.jpg"
+    )
 
     print("\n--- Retry loop result ---")
     print(f"status: {status}")

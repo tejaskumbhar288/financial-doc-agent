@@ -7,9 +7,9 @@ also gives the Guard Agent (later checkpoint) something concrete to test
 redaction against, since we know exactly what PII we planted.
 """
 
-from decimal import Decimal
-from random import randint, choice
 from datetime import date, timedelta
+from decimal import Decimal
+from random import choice, randint
 
 from faker import Faker
 

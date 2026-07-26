@@ -11,18 +11,18 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class DocumentType(str, Enum):
+class DocumentType(StrEnum):
     INVOICE = "invoice"
     STATEMENT = "statement"
     RECEIPT = "receipt"
 
 
-class ProcessingStatus(str, Enum):
+class ProcessingStatus(StrEnum):
     """
     Outcome of running a document through the pipeline.
 

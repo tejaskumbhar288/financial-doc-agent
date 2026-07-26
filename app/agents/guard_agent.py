@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 from app.agents.guard import GuardResult, redact_text
 from app.agents.injection_scan import InjectionScanResult, scan_for_injection
 
@@ -12,7 +13,7 @@ class GuardAgentResult:
     both the redacted text and the injection scan result.
     """
 
-    guard_result: GuardResult
+    redaction_result: GuardResult
     injection_scan_result: InjectionScanResult
 
 
@@ -22,9 +23,8 @@ def run_guard(text: str) -> GuardAgentResult:
     redacted text and findings. This is the main entry point for
     Guard Agent usage.
     """
-    guard_result = redact_text(text)
-    injection_scan_result = scan_for_injection(guard_result.redacted_text)
+    redaction_result = redact_text(text)
+    injection_scan_result = scan_for_injection(redaction_result.redacted_text)
     return GuardAgentResult(
-        guard_result=guard_result,
-        injection_scan_result=injection_scan_result
+        redaction_result=redaction_result, injection_scan_result=injection_scan_result
     )

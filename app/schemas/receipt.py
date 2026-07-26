@@ -34,12 +34,8 @@ class ReceiptLineItem(BaseModel):
     """A single itemized line on a receipt. Optional — see module docstring."""
 
     description: str = Field(..., description="Item description as printed on the receipt.")
-    quantity: float | None = Field(
-        default=None, description="Quantity purchased, if legible."
-    )
-    unit_price: Decimal | None = Field(
-        default=None, description="Price per unit, if legible."
-    )
+    quantity: float | None = Field(default=None, description="Quantity purchased, if legible.")
+    unit_price: Decimal | None = Field(default=None, description="Price per unit, if legible.")
     amount: Decimal = Field(..., description="Total amount for this line.")
 
 

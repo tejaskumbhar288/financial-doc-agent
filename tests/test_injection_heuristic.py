@@ -53,8 +53,7 @@ def test_does_not_flag_benign_samples():
     for text in BENIGN_SAMPLES:
         result = heuristic_scan(text)
         assert not result.flagged, (
-            f"False positive on legitimate text: {text!r} "
-            f"(matched: {result.matched_patterns})"
+            f"False positive on legitimate text: {text!r} (matched: {result.matched_patterns})"
         )
 
 
