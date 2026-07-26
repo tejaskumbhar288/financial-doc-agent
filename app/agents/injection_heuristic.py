@@ -37,12 +37,8 @@ HEURISTIC_PATTERNS: dict[str, re.Pattern] = {
         r"you\s+are\s+now\s+(an?\s+)?\w+|act\s+as\s+(an?\s+)?\w+|pretend\s+(you\s+are|to\s+be)",
         re.IGNORECASE,
     ),
-    "fake_system_turn": re.compile(
-        r"(^|\n)\s*(system|assistant)\s*:", re.IGNORECASE
-    ),
-    "new_instructions": re.compile(
-        r"new\s+instructions\s*:", re.IGNORECASE
-    ),
+    "fake_system_turn": re.compile(r"(^|\n)\s*(system|assistant)\s*:", re.IGNORECASE),
+    "new_instructions": re.compile(r"new\s+instructions\s*:", re.IGNORECASE),
     "output_override": re.compile(
         r"(instead\s+)?output\s*:\s*['\"]?(approved|verified|\$?0(\.00)?)",
         re.IGNORECASE,

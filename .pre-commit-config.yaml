@@ -1,0 +1,31 @@
+# Runs at `git push` time (installed via `uv run pre-commit install
+# --hook-type pre-push`), not commit time — catches lint/type issues
+# before they ever leave this machine, as a local backstop to the
+# GitHub Actions CI check (.github/workflows/ci.yml).
+#
+# Hooks call `uv run ...` directly (language: system) instead of the
+# usual mirrored hook repos (e.g. astral-sh/ruff-pre-commit). That
+# keeps exactly one place — pyproject.toml — pinning tool versions,
+# so this can never drift out of sync with what CI and `uv run` use
+# locally.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+
+      - id: mypy
+        name: mypy
+        entry: uv run mypy app tests
+        language: system
+        types: [python]
+        pass_filenames: false
