@@ -6,7 +6,7 @@
 > context/instructions.md) — no longer maintained as a Project knowledge
 > upload.
 >
-> Last updated: Checkpoint 7 complete
+> Last updated: Checkpoint 8 complete
 
 ---
 
@@ -150,9 +150,8 @@ failure classes and probably shouldn't share a retry strategy.
 
 ## Not Yet Started (per architecture doc build phases)
 
-- Guard Agent (PII/prompt-injection redaction)
-- LangGraph orchestration (currently everything is plain Python, no graph)
-- Anomaly Detection Agent
+- Anomaly Detection Agent (Checkpoint 9 — the third node the LangGraph
+  skeleton in Checkpoint 8 is built to accommodate but doesn't have yet)
 - Postgres persistence
 - Redis queue
 - Reconciliation step
@@ -527,6 +526,158 @@ stage, HMAC fingerprints, computed `confidence_score`, and quarantine
 routing. That's intentional (design before build), but it means the doc
 should not be read as a description of what works today — `PROGRESS.md`
 remains the source of truth for that.
+
+## Checkpoint 8 — LangGraph Orchestration Skeleton (Guard → Extraction) — ✅ COMPLETE
+
+**Status:** Built on `feature/langgraph-orchestration`, off freshly-pulled
+`development`.
+
+**What works:** `app/orchestrator.py` — the first real LangGraph
+`StateGraph`, replacing plain sequential function calls with actual
+nodes/edges. Wires the two agents that already existed (Guard, Extraction)
+per architecture doc Build Phase 2. **Anomaly Detection Agent is not in
+the graph** — it doesn't exist as code yet (Checkpoint 9), so Phase 2 as
+originally scoped ("Guard → Extraction → Anomaly via LangGraph" as one
+step) was split into two checkpoints rather than attempted as one.
+
+Shape:
+```
+START -> guard -> (route_after_guard) -> quarantine  -> END
+                                       -> extraction -> END
+```
+
+- `PipelineState` (TypedDict) — the working-memory object (Section 10)
+  that flows through every node. `guard_result`/`extraction_result`/
+  `status` are typed `| None` since they don't exist until their
+  producing node has actually run; `source_filename`/`raw_text` are
+  required since ingestion is what creates the state to begin with.
+- `guard_node` — wraps `run_guard`. Deliberately does NOT set `status`,
+  even though it could — routing (quarantine vs. extraction) is the
+  conditional edge's job, not the node's. Keeping "do the work" and
+  "decide what happens next" separate is the point of the node/edge
+  split.
+- `route_after_guard` — the conditional edge. Returns a plain string key
+  (`"quarantine"`/`"extraction"`), not a node name directly; the actual
+  key-to-node mapping lives in `build_graph`'s `path_map`, so this
+  function stays ignorant of the graph's structure. This is the
+  fail-closed quarantine policy (Section 6) made concrete as a routing
+  edge.
+- `quarantine_node` — one line, sets `status=QUARANTINED`. Exists only
+  because edges can choose the next node but can't write state — even a
+  decision this simple needs a node to actually persist it.
+- `extraction_node` — wraps `extract_receipt_with_retry`. Reads
+  `guard_result.redaction_result.redacted_text`, never `raw_text` —
+  Extraction makes an LLM call, and `raw_text` may still hold unredacted
+  PII at that point in the pipeline. Unlike `guard_node`, this sets
+  `status` directly, since nothing follows it in this graph to defer to.
+- `build_graph()` — compiles the above into a runnable graph via
+  `add_node`/`add_edge`/`add_conditional_edges`.
+
+**Real bug found and fixed before it could bite:** `extract_receipt_with_retry`
+(and everything it called) never actually took extraction text as input —
+it silently read the module-level `RAW_RECEIPT_TEXT` constant regardless
+of what was passed. Invisible until now because nothing had called it with
+real upstream data before. Threading Guard's output into Extraction would
+have silently ignored it and always extracted the same sample receipt.
+Fixed by threading `receipt_text` through as a real parameter
+(`extract_receipt_with_retry`, `_build_prompt`, `_call_llm`,
+`extract_receipt`) instead of the functions reaching for a global.
+
+**Naming fix, source of a real point of confusion:** `GuardAgentResult`
+(the Guard Agent's overall output) had a field literally named
+`guard_result` holding just the redaction sub-result, sitting next to
+`injection_scan_result`. Once the orchestrator also needed a state field
+for the whole `GuardAgentResult`, that produced
+`state["guard_result"].guard_result` — same word, two different things.
+Renamed `GuardAgentResult.guard_result` → `redaction_result` at the
+source (not just avoided in the orchestrator), so the two fields read
+symmetrically and the ambiguity is gone in both directions. No production
+code or tests referenced the old field name outside what this checkpoint
+was actively writing, so the rename was a clean, low-risk fix.
+
+**Tested:** `tests/test_orchestrator.py`, 2 tests — mocks `run_guard` and
+`extract_receipt_with_retry` (same reasoning as `test_guard_agent.py`
+mocking `scan_for_injection`: this suite should run without a live Ollama
+instance). Covers the one genuinely NEW thing this checkpoint adds, the
+routing decision: a flagged document reaches `QUARANTINED` status without
+`extract_receipt_with_retry` ever being called; a clean document reaches
+Extraction and the real result flows through to the final state. A
+separate manual `__main__` block in `orchestrator.py` runs the graph
+end-to-end against live Ollama (clean receipt + injection-attempt cases),
+same convention as `extract_receipt.py`'s own `__main__`.
+
+**Data provenance finding, unrelated to the graph but discovered this
+checkpoint:** downloaded the Kaggle datasets locally
+(`app/data/samples/`) and actually inspected them rather than trusting
+dataset listings. SROIE2019 turned out to be **Malaysian**, not
+unattributed/neutral as ARCHITECTURE.md previously implied — confirmed
+via raw ground-truth files (`SDN BHD` company suffixes, `RM` currency,
+Kuala Lumpur/Johor Bahru addresses). Separately, the invoice dataset
+("High-Quality Invoice Images for OCR") is **synthetic**, not real
+invoices — confirmed via its own ground-truth CSV (Faker-generated
+names/addresses, internally inconsistent locale formatting). Searched for
+a same-country (Indian) alternative with SROIE's quality; nothing found
+matched — candidates were synthetic, privately-sourced, or unlabeled.
+Decision: kept SROIE + the existing US compliance framing (SOX/AML/
+PCI-DSS), since document *structure* and regulatory *compliance scope*
+are different concerns and neither schema hardcodes a currency/country.
+Documented as new Section 5/5a in `ARCHITECTURE.md`, correcting the
+dataset table's claims and explaining the reasoning explicitly so it
+doesn't have to be re-derived later.
+
+**Tooling added this checkpoint (repo-wide, not scoped to the graph
+work):**
+- `ruff` (lint + format) and `mypy` (type check) as dev dependencies.
+  `E501` (line length) deliberately ignored in `pyproject.toml` — several
+  files carry natural-language content (LLM prompts, few-shot examples,
+  test fixtures) that reads worse artificially wrapped, and the formatter
+  doesn't rewrap string contents anyway.
+- Ran both across the whole repo and fixed everything found: an
+  import-sort issue (auto-fixed), a whole-repo `ruff format` pass (12
+  files, style-only), two scoped `# type: ignore[arg-type]` additions —
+  each with an explanatory comment, not a bare suppress — for a
+  documented Pydantic string-coercion pattern and a known Presidio
+  cross-package type quirk, and two `assert`s in `orchestrator.py` for
+  the `guard_result | None` narrowing (chosen over silent suppression —
+  doubles as a runtime guard if the graph is ever mis-wired).
+- Modernized `DocumentType`/`ProcessingStatus`/`TransactionType` from
+  `(str, Enum)` to `StrEnum` (ruff's `UP042`) — verified first that
+  nothing depended on the old `str()` output
+  (`"ProcessingStatus.PROCESSED"`); string equality and `.value` behavior
+  are unaffected, and the one place that prints a status now reads
+  cleanly (`"processed"` instead of the enum repr).
+- Caught one real thing by actually *running* the new code rather than
+  just linting it: a `SyntaxWarning: invalid escape sequence` from a
+  `\-` character in a docstring diagram. Ruff hadn't caught it because
+  `W` (pycodestyle warnings, which includes `W605`) wasn't in the
+  original `select` list — added it.
+- `.pre-commit-config.yaml` (repo root, not inside `.github/` — that's
+  reserved for GitHub-native features; `pre-commit` is a separate tool
+  that hardcodes looking for its config at the repo root). Installed at
+  **pre-push** stage (`pre-commit install --hook-type pre-push`), not the
+  default commit stage. Hooks call `uv run ruff`/`uv run mypy` directly
+  (`language: system`) instead of the usual mirrored hook repos, so
+  `pyproject.toml` stays the single place pinning tool versions.
+- `.github/workflows/ci.yml` — runs ruff + mypy on every push/PR to
+  `main`/`development`. **Deliberately excludes `pytest`** — the
+  injection-judge tests need live Ollama and Presidio needs the
+  `en_core_web_lg` spaCy model, neither available on a GitHub Actions
+  runner (this gap was already tracked in Checkpoint 7's open items, not
+  newly discovered here). Branch protection (required status checks)
+  still needs to be enabled manually via GitHub's web UI — no `gh` CLI in
+  this environment to do it from the terminal.
+
+**Not yet solved:**
+- Anomaly Detection Agent doesn't exist, so the graph is 2 real nodes +
+  1 terminal node, not the 3-node Guard→Extraction→Anomaly shape Section
+  3's diagram shows — Checkpoint 9
+- Branch protection rules not yet enabled on GitHub (workflow exists,
+  required-check enforcement doesn't)
+- `pytest` still not in CI — same Ollama/spaCy provisioning gap tracked
+  since Checkpoint 4/5/7
+- The graph only handles receipts — invoice/statement extraction were
+  never wired in (matches the fact that `extract_receipt.py` is the only
+  extraction agent that exists)
 
 ## Git Housekeeping Notes
 
