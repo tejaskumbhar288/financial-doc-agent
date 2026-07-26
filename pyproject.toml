@@ -1,7 +1,7 @@
 [project]
 name = "financial-doc-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Multi-agent AI system for financial document extraction, fraud detection, and reconciliation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

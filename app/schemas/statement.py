@@ -2,19 +2,18 @@
 StatementExtraction schema.
 
 Unlike InvoiceExtraction/ReceiptExtraction, this is NOT grounded in a Kaggle
-dataset — per the architecture doc (Section 5), real bank/credit card
-statement data is too PII-sensitive to find good public datasets for.
-Structure here is designed from general knowledge of statement formats,
-then validated against synthetic Faker-generated data (see
-app/data/generate_synthetic_statement.py).
+dataset — real bank/credit card statement data is too PII-sensitive to find
+good public datasets for. Structure here is designed from general knowledge
+of statement formats, then validated against synthetic Faker-generated data
+(see app/data/generate_synthetic_statement.py).
 
 Key design decision: account_number and routing_number are modeled as
 ALREADY-REDACTED/MASKED strings (e.g. "****1234"), not raw PII. This
-reflects the actual pipeline order in Section 2 — the Guard Agent runs
-BEFORE extraction, so the Extraction Agent (and this schema) never sees
-real account/routing numbers in the first place. This is the "least
-privilege data flow" principle (Section 6) showing up directly in schema
-design, not just in the architecture diagram.
+reflects the actual pipeline order — the Guard Agent runs BEFORE
+extraction, so the Extraction Agent (and this schema) never sees real
+account/routing numbers in the first place. That's the least-privilege
+data flow principle showing up directly in schema design: a schema that
+cannot hold raw PII can't leak it, regardless of what callers do.
 """
 
 from __future__ import annotations

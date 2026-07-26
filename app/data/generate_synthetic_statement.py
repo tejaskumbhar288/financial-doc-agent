@@ -1,8 +1,8 @@
 """
 Generates a synthetic bank statement for testing StatementExtraction.
 
-Per architecture doc Section 5: real statement data is too PII-sensitive
-to source publicly, so we generate our own with known-answer PII — this
+Real statement data is too PII-sensitive to source publicly, so we
+generate our own with known-answer PII — this
 also gives the Guard Agent (later checkpoint) something concrete to test
 redaction against, since we know exactly what PII we planted.
 """

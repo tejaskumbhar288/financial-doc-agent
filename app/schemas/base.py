@@ -23,9 +23,24 @@ class DocumentType(str, Enum):
 
 
 class ProcessingStatus(str, Enum):
-    """Mirrors the status enum from Section 9 of the architecture doc."""
+    """
+    Outcome of running a document through the pipeline.
+
+    QUARANTINED is deliberately distinct from NEEDS_REVIEW: it means the
+    Guard Agent detected a prompt-injection attempt, so the document was
+    refused outright and never processed. NEEDS_REVIEW means we DID
+    process it and couldn't get a trustworthy result. Anyone triaging the
+    review queue needs to tell those two apart -- "we refused to touch
+    this" and "we tried and failed" call for different handling.
+
+    UNRECONCILED is narrower: extraction succeeded, but the document
+    couldn't be matched against its counterpart (invoice <-> statement
+    transaction) even after widening the match window.
+    """
+
     PROCESSED = "processed"
     NEEDS_REVIEW = "needs_review"
+    QUARANTINED = "quarantined"
     UNRECONCILED = "unreconciled"
 
 
@@ -57,11 +72,20 @@ class FinancialDocument(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Extraction Agent's self-reported confidence for this document, 0.0-1.0.",
+        description=(
+            "Extraction confidence, 0.0-1.0. COMPUTED by our own code from "
+            "observable signals (how many attempts extraction needed, whether "
+            "the arithmetic self-check passed, how many optional fields came "
+            "back empty, whether the source was a native PDF text layer or "
+            "OCR). Never self-reported by the LLM -- a model's stated "
+            "confidence is a generated token sequence, not a calibrated "
+            "probability, and correlates with how confident the input text "
+            "sounds rather than with correctness."
+        ),
     )
     status: ProcessingStatus = Field(
         default=ProcessingStatus.PROCESSED,
-        description="Processing outcome — set by the retry/human-review policy (Section 9).",
+        description="Processing outcome — set by the retry/human-review policy.",
     )
 
     model_config = {
