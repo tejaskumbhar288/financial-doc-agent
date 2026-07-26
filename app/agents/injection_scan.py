@@ -1,7 +1,6 @@
 """
-Guard Agent -- prompt-injection scan (Architecture doc Section 2 & 6,
-the second Guard Agent responsibility alongside PII/PCI redaction in
-guard.py).
+Guard Agent -- prompt-injection scan. The second Guard Agent
+responsibility, alongside PII/PCI redaction in guard.py.
 
 Hybrid two-layer detector:
   1. Heuristic pre-filter (injection_heuristic.py) -- cheap, deterministic.
@@ -21,8 +20,9 @@ either layer alone.
 NOT included yet: a dedicated classifier model (a third, faster-than-LLM
 layer). Deliberately deferred -- we don't yet have real test cases,
 including cases the LLM-judge gets wrong, to validate a classifier
-against. Same data-grounding principle used throughout this project
-(Section 5). Tracked in PROGRESS.md as a future extension.
+against. Same data-grounding principle used throughout this project:
+validate against real evidence rather than assumption. Tracked in
+PROGRESS.md as a future extension.
 """
 
 from __future__ import annotations

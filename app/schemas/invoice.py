@@ -20,12 +20,12 @@ Key findings from real data that shaped this schema:
   - Dates in this dataset are MM/DD/YYYY (US-style) — the OPPOSITE
     convention from SROIE's DD/MM/YYYY receipts. Confirms date format
     can't be assumed consistent across document types/vendors; the
-    Extraction Agent's retry loop (architecture doc Section 8) is the
-    real defense here, not a single hardcoded parser.
+    Extraction Agent's retry loop is the real defense here, not a single
+    hardcoded parser.
   - IBAN observed on the seller block in raw OCR text. Added as an
     optional field specifically to support the "vendor/account mismatch"
-    anomaly rule (Section 7) — without it, that rule has nothing to
-    compare against for invoices.
+    anomaly rule — without it, that rule has nothing to compare against
+    for invoices.
   - Line items are NOT optional here (unlike ReceiptExtraction) — every
     real sample had a populated items table, and it's core to invoice
     semantics (net/VAT/gross math depends on it).
@@ -99,8 +99,8 @@ class InvoiceExtraction(FinancialDocument):
         default=None,
         description=(
             "Seller's bank IBAN, if present. Optional — added specifically to support "
-            "the 'vendor/account mismatch' anomaly rule (architecture doc Section 7), "
-            "which needs prior banking info to compare against for BEC/wire fraud detection."
+            "the 'vendor/account mismatch' anomaly rule, which needs prior banking "
+            "info to compare against for BEC/wire fraud detection."
         ),
     )
     client_name: str = Field(..., description="Buyer/recipient name (source: 'Client Name').")

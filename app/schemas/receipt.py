@@ -14,8 +14,8 @@ Key findings from real data that shaped this schema:
   - Line items (CODE/DESC/QTY/PRICE/AMOUNT) are visible on the physical
     receipt but are NOT part of SROIE's ground truth — confirmed by the
     labels list above. Included here anyway as OPTIONAL, because the
-    architecture doc's anomaly rule "line items don't sum to total"
-    (Section 7) needs somewhere to attach for receipts, not just invoices.
+    anomaly rule "line items don't sum to total" needs somewhere to
+    attach for receipts, not just invoices.
     Optional because OCR reliably captures header fields but often
     struggles with itemized rows on low-quality receipt scans.
 """
