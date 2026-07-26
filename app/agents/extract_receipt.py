@@ -17,10 +17,11 @@ in the same way with cloud providers' proper tool-calling APIs.
 import ollama
 from pydantic import BaseModel, ValidationError
 
+from app.schemas.base import ProcessingStatus
 from app.schemas.receipt import ReceiptExtraction
 
 MODEL = "llama3.2:3b"
-MAX_RETRIES = 2  # 2 retries = 3 attempts total, per Architecture doc Section 9
+MAX_RETRIES = 2  # 2 retries = 3 attempts total
 
 
 class ReceiptContentRaw(BaseModel):
@@ -60,9 +61,9 @@ def _describe_validation_error(exc: ValidationError) -> str:
     """
     Turns a pydantic ValidationError into a short, LLM-readable failure
     reason — e.g. "total: could not parse 'nine dollars' as Decimal".
-    This is what gets threaded back in as prior_failure_context (Section 10's
-    short-term/in-loop memory) — without it, a retry is just re-asking the
-    same question with no new information.
+    This is what gets threaded back in as prior_failure_context — the
+    short-term, in-loop memory of the retry loop. Without it, a retry is
+    just re-asking the same question with no new information.
     """
     parts = []
     for err in exc.errors():
@@ -71,17 +72,30 @@ def _describe_validation_error(exc: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def extract_receipt_with_retry(source_filename: str) -> tuple[ReceiptExtraction | None, str]:
+def extract_receipt_with_retry(
+    source_filename: str,
+) -> tuple[ReceiptExtraction | None, ProcessingStatus]:
     """
-    Extraction with the self-check/retry loop from Architecture doc Section 9.
+    Extraction with the self-check/retry loop.
 
     Returns (result, status):
-      - (ReceiptExtraction, "processed")       on success
-      - (None, "needs_human_review")           if all attempts fail
+      - (ReceiptExtraction, ProcessingStatus.PROCESSED)     on success
+      - (None, ProcessingStatus.NEEDS_REVIEW)               if all attempts fail
+
+    Returns the ProcessingStatus enum rather than a bare string so the
+    value can't drift out of sync with the enum everything downstream
+    compares against.
+
+    Only ValidationError is caught here. Infrastructure failures (Ollama
+    unreachable, timeouts) are deliberately NOT retried by this loop --
+    they're a different failure class needing backoff, not a reworded
+    prompt, and retrying them here would burn the attempt budget that a
+    real extraction-quality failure needs.
 
     Every attempt is logged (attempt number, failure reason if any) — the
-    audit trail requirement. For now this is just print(); Checkpoint 5+
-    (Postgres) replaces this with a real review_queue / audit log table.
+    audit trail requirement. For now this is just print(); Postgres
+    persistence later replaces this with a real review_queue / audit log
+    table.
     """
     prior_failure_context: str | None = None
 
@@ -99,19 +113,20 @@ def extract_receipt_with_retry(source_filename: str) -> tuple[ReceiptExtraction 
             continue
 
         print(f"[extract_receipt] attempt {attempt} SUCCEEDED")
-        return result, "processed"
+        return result, ProcessingStatus.PROCESSED
 
-    print(f"[extract_receipt] all {MAX_RETRIES + 1} attempts exhausted — needs_human_review")
-    return None, "needs_human_review"
+    print(f"[extract_receipt] all {MAX_RETRIES + 1} attempts exhausted — "
+          f"{ProcessingStatus.NEEDS_REVIEW.value}")
+    return None, ProcessingStatus.NEEDS_REVIEW
 
 
 def _build_prompt(prior_failure_context: str | None = None) -> str:
     """
     Builds the extraction prompt. If a previous attempt failed validation,
     prior_failure_context carries the specific reason back in — this is
-    the "short-term/in-loop memory" mechanism from Architecture doc
-    Section 10: it's what makes a retry an actual second attempt instead
-    of just re-asking the same question and hoping for a different answer.
+    the short-term/in-loop memory mechanism: it's what makes a retry an
+    actual second attempt instead of just re-asking the same question and
+    hoping for a different answer.
     """
     retry_note = ""
     if prior_failure_context:

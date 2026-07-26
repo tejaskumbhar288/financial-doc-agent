@@ -6,7 +6,7 @@
 > context/instructions.md) — no longer maintained as a Project knowledge
 > upload.
 >
-> Last updated: Checkpoint 6 complete
+> Last updated: Checkpoint 7 complete
 
 ---
 
@@ -429,6 +429,104 @@ and reviews, the user writes the code, by default.
 - Same not-yet-in-CI gap as Checkpoints 4/5 (spaCy model + live Ollama
   dependency) — `test_guard_agent.py`'s one test doesn't need either
   (fully mocked), but the modules it wraps still do
+
+---
+
+## Checkpoint 7 — Architecture Review & Consistency Hardening — ✅ COMPLETE
+
+Not a feature checkpoint. A full review pass over `ARCHITECTURE.md` for
+robustness, plus the code fixes that fell out of it. Worth logging because
+several findings were real design gaps, not tidying.
+
+### Design gaps found and closed in `ARCHITECTURE.md`
+
+1. **The file → text parsing stage didn't exist anywhere.** The flow went
+   "user uploads PDF/image/CSV" straight to "Guard operates on text," with
+   nothing in between, and no OCR/parsing library in the tech stack or
+   `pyproject.toml`. Everything has worked so far only because SROIE ships
+   pre-OCR'd ground-truth text. Added as an explicit stage: pdfplumber for
+   text-layer PDFs, Tesseract for scans/images, routed by **text-layer
+   detection rather than file extension** (a `.pdf` may be either). Called
+   out as deliberately not an agent — no LLM, no retries, no judgment.
+2. **Injection detection had no defined response.** Guard could return
+   `flagged=True` and nothing said what the system should then do. Now a
+   documented fail-closed policy: flagged → **quarantined**, never
+   proceeds to Extraction, written to the review queue with the detecting
+   layer and reason.
+3. **Redaction destroys the data one anomaly rule depends on.** Guard
+   redacts `IBAN_CODE`; `InvoiceExtraction.vendor_iban` exists
+   specifically for the vendor/account-mismatch (BEC) rule. By the time
+   extraction runs, that field can only hold `****1234`, so the rule
+   degrades to comparing last-4 digits and two unrelated accounts sharing
+   them look identical — a false negative in exactly the rule meant to
+   catch wire fraud. Documented resolution: a keyed **HMAC fingerprint**
+   emitted alongside the mask, enabling exact equality comparison without
+   retaining the raw value. **Designed, not yet implemented.**
+4. **`confidence_score` was routed on but never defined.** Two sections
+   describe low-confidence → human-review routing, the schema makes the
+   field required, and `extract_receipt.py` hardcodes `0.9`. Now defined
+   as computed deterministically from observable signals (attempts used,
+   arithmetic self-check, missing optional fields, parse route) rather
+   than self-reported by the model. **Defined, not yet implemented — the
+   hardcoded 0.9 is still there.**
+5. **Retry policy conflated two failure classes.** The documented loop
+   only covered validation failures. Added an explicit taxonomy: quality
+   failures retry with context and count against `MAX_RETRIES`; transient
+   infra failures retry with backoff and don't; permanent failures fail
+   immediately. This matches what `extract_receipt.py` already does in
+   practice (only `ValidationError` is caught) — the code was right, the
+   doc hadn't said so.
+
+Also formalized the anomaly thresholds that had been marked "to be
+formalized" (including the ≥30-sample floor on the z-score rule, and the
+history-injection principle: rules receive history as a parameter, never
+fetch it), and added a section recording the `llama3.2:3b` constraints
+discovered in Checkpoints 2/5 (temperature=0, few-shot over descriptive
+rules, GBNF grammar limits).
+
+Stale facts corrected: model was still listed as "Llama 3.1 8B or Mistral
+7B"; the invoice dataset row still said "synthetic"; ABA routing was
+credited to a bare custom regex (it's checksum-validated) and SSN to a
+custom regex (it's Presidio built-in); the open-items list still claimed
+the Pydantic schemas were undrafted.
+
+### Code fixes
+
+- **`ProcessingStatus` gained `QUARANTINED`**, with a docstring explaining
+  why it's distinct from `NEEDS_REVIEW` — "we refused to touch this" and
+  "we tried and failed" need different triage handling.
+- **`extract_receipt_with_retry()` returned a bare string that matched no
+  enum member.** It returned `"needs_human_review"` while the enum defines
+  `NEEDS_REVIEW = "needs_review"` — latent bug the moment anything compared
+  against `ProcessingStatus`. Now returns the enum itself, and the return
+  type says so. Safe because `ProcessingStatus` is a `str, Enum`, so
+  existing string comparisons still hold.
+- **`confidence_score`'s description said "self-reported"**, contradicting
+  the computed-not-asked design. Corrected.
+
+### Decision — `ARCHITECTURE.md` stays local, so code must stand alone
+
+`ARCHITECTURE.md` and `context/instructions.md` are gitignored personal
+context. But 29 code comments across 10 files cited it by section number
+("Architecture doc Section 6"), pointing anyone cloning the repo at a
+document they cannot see. All 29 were rewritten to explain the reasoning
+inline instead. Most were mechanical — the explanation was already in the
+comment and the citation was decoration — but a few (the
+`ProcessingStatus` docstring, `test_guard.py`'s opener) were *only*
+citations and needed real replacement text.
+
+Rule going forward: **code comments explain themselves; they never cite
+the architecture doc.** `PROGRESS.md` may still reference it, since both
+readers of this file (the user, and any Claude session) have it locally —
+the audiences genuinely differ.
+
+### Doc is now ahead of the code — deliberately
+
+`ARCHITECTURE.md` describes four things that don't exist yet: the parsing
+stage, HMAC fingerprints, computed `confidence_score`, and quarantine
+routing. That's intentional (design before build), but it means the doc
+should not be read as a description of what works today — `PROGRESS.md`
+remains the source of truth for that.
 
 ## Git Housekeeping Notes
 

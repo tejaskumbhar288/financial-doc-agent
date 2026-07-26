@@ -1,7 +1,7 @@
 """
-Prompt-injection heuristic pre-filter -- layer 1 of the hybrid detector
-(Architecture doc Section 2 & 6, Guard Agent's second responsibility
-alongside PII/PCI redaction).
+Prompt-injection heuristic pre-filter -- layer 1 of the hybrid detector,
+part of the Guard Agent's injection-scanning responsibility alongside
+PII/PCI redaction.
 
 Cheap, deterministic pattern matching. Catches the common, unsophisticated
 injection attempts for free (no LLM call) -- most real attempts are fairly

@@ -1,12 +1,14 @@
 """
-Guard Agent tests -- TDD with known-answer PII fixtures, per Architecture
-doc Section 4's testing row ("especially the Guard agent").
+Guard Agent tests -- TDD with known-answer PII fixtures. The Guard Agent
+gets the heaviest test coverage in this project deliberately: a silent
+redaction failure leaks real PII, which is the one failure class here
+that can't be walked back after the fact.
 
 We embed KNOWN values into a raw text blob (simulating extracted document
-text) and assert the Guard Agent actually redacts them. This is the same
-"known-answer PII" approach the architecture doc calls out for
-generate_synthetic_statement.py -- except here it's inline, since we need
-control over exact values to test the checksum edge cases.
+text) and assert the Guard Agent actually redacts them. Same
+"known-answer PII" approach as generate_synthetic_statement.py -- except
+here it's inline, since we need control over exact values to test the
+checksum edge cases.
 """
 
 from app.agents.guard import is_valid_aba_checksum, redact_text

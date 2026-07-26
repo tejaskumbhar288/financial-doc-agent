@@ -1,8 +1,7 @@
 """
-Guard Agent — PII/PCI redaction (Architecture doc Section 2 & 6).
+Guard Agent — PII/PCI redaction.
 
-Runs BEFORE any document text reaches an LLM (Section 2, step 2). Detects
-and redacts:
+Runs BEFORE any document text reaches an LLM. Detects and redacts:
   - Credit card numbers (PAN)   -> Presidio built-in CREDIT_CARD
   - Bank account numbers         -> Presidio built-in US_BANK_NUMBER
   - ABA routing numbers          -> custom recognizer (Presidio has none
@@ -12,11 +11,11 @@ and redacts:
   - IBAN                         -> Presidio built-in IBAN_CODE
 
 Deliberately NOT redacted:
-  - PERSON (names). Not in Architecture doc Section 6's redaction list
-    (that list is scoped to data that alone enables impersonation/fraud:
-    account numbers, routing numbers, PANs, SSN/Tax ID, full addresses --
-    a name alone doesn't). Also a hard functional requirement: schemas
-    like StatementExtraction.account_holder_name are required fields the
+  - PERSON (names). Redaction here is scoped to data that ALONE enables
+    impersonation/fraud: account numbers, routing numbers, PANs, SSN/Tax
+    ID, full addresses -- a name by itself doesn't. Also a hard
+    functional requirement: schemas like
+    StatementExtraction.account_holder_name are required fields the
     Extraction Agent must populate downstream. Redacting names would
     break extraction, not improve security. See PROGRESS.md Checkpoint 4
     for the full reasoning.
@@ -24,8 +23,7 @@ Deliberately NOT redacted:
 Design boundary: this module only works on raw TEXT, never on parsed
 Pydantic schemas -- it runs upstream of Extraction, on the raw document
 text pulled from the uploaded file. Guard doesn't know what Extraction
-does with the redacted text afterward (least-privilege data flow,
-Section 2).
+does with the redacted text afterward -- least-privilege data flow.
 """
 
 from __future__ import annotations
@@ -138,13 +136,13 @@ _OPERATORS = {
 @dataclass
 class GuardFinding:
     """
-    One redaction decision -- feeds the audit trail (Section 6).
+    One redaction decision -- feeds the audit trail.
 
     Deliberately does NOT store the raw original span. Storing raw PII
     in an object explicitly meant for audit logging/persistence would
     reintroduce the exact leak the Guard Agent exists to prevent -- if
     these findings are ever logged or written to the review_queue /
-    audit tables (Section 9), a raw PAN/SSN/routing number would end up
+    audit tables, a raw PAN/SSN/routing number would end up
     sitting in plaintext in the audit trail itself. masked_preview gives
     enough to confirm what was found and roughly where, without holding
     the sensitive value anywhere past this function call.
@@ -167,7 +165,7 @@ def redact_text(text: str) -> GuardResult:
     Detects and redacts PII/PCI in raw text before it reaches any LLM.
 
     Returns both the redacted text and a findings list. The findings list
-    is what the audit trail requirement (Section 6) needs -- every Guard
+    is what the audit trail requirement needs -- every Guard
     Agent decision should be loggable with what was found and how
     confident the detector was, not just silently applied.
     """
