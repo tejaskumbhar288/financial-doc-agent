@@ -20,14 +20,14 @@ from __future__ import annotations
 
 from datetime import date as date_type
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from app.schemas.base import DocumentType, FinancialDocument
 
 
-class TransactionType(str, Enum):
+class TransactionType(StrEnum):
     DEBIT = "debit"
     CREDIT = "credit"
 

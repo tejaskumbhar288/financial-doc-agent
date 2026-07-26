@@ -71,10 +71,14 @@ class InvoiceLineItem(BaseModel):
     )
     net_price: Decimal = Field(..., description="Unit price before tax (source: 'Net price').")
     net_worth: Decimal = Field(..., description="Line subtotal before tax (source: 'Net worth').")
-    vat_percent: Decimal = Field(..., description="VAT/tax rate as a percentage, e.g. 10.00 for 10%.")
+    vat_percent: Decimal = Field(
+        ..., description="VAT/tax rate as a percentage, e.g. 10.00 for 10%."
+    )
     gross_worth: Decimal = Field(..., description="Line total after tax (source: 'Gross worth').")
 
-    @field_validator("quantity", "net_price", "net_worth", "vat_percent", "gross_worth", mode="before")
+    @field_validator(
+        "quantity", "net_price", "net_worth", "vat_percent", "gross_worth", mode="before"
+    )
     @classmethod
     def normalize_numbers(cls, value):
         return _normalize_decimal(value)
