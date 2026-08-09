@@ -75,15 +75,11 @@ class AnomalyFlag(Base):
     - vendor_account_mismatch: {new_fingerprint: "****1234", prior_fingerprints: [...]}
     """
 
-    created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     """Timestamp when anomaly was detected."""
 
     # Relationship to document
-    document: Mapped["ExtractedDocument"] = relationship(
-        back_populates="anomalies"
-    )
+    document: Mapped[ExtractedDocument] = relationship(back_populates="anomalies")
 
     def __repr__(self) -> str:
         return (

@@ -55,41 +55,31 @@ class ExtractedDocument(Base):
     Preserves all fields: company/date/total/line_items etc.
     """
 
-    confidence_score: Mapped[Decimal] = mapped_column(
-        Numeric(3, 2), default=Decimal("0.0")
-    )
+    confidence_score: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.0"))
     """
     Extraction confidence (0.0–1.0), computed deterministically from
     observable signals: attempts used, arithmetic checks, missing fields,
     parse route (Section 7/9). Not self-reported by the LLM.
     """
 
-    status: Mapped[ProcessingStatus] = mapped_column(
-        default=ProcessingStatus.PROCESSED
-    )
+    status: Mapped[ProcessingStatus] = mapped_column(default=ProcessingStatus.PROCESSED)
     """
     Current processing state: PROCESSED, NEEDS_REVIEW, QUARANTINED, or
     UNRECONCILED. Set by orchestrator based on guard/extraction/anomaly
     results.
     """
 
-    created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     """Timestamp when document was first ingested."""
 
-    updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
     """Timestamp of last status update (anomaly detection, reconciliation, etc.)."""
 
     # Relationship to vendor (many documents belong to one vendor)
-    vendor: Mapped["Vendor"] = relationship(back_populates="documents")
+    vendor: Mapped[Vendor] = relationship(back_populates="documents")
 
     # Relationship to anomalies (one document can have many flagged anomalies)
-    anomalies: Mapped[list["AnomalyFlag"]] = relationship(
-        back_populates="document"
-    )
+    anomalies: Mapped[list[AnomalyFlag]] = relationship(back_populates="document")
 
     def __repr__(self) -> str:
         return (
