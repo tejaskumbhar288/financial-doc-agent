@@ -48,11 +48,7 @@ class AnomalyDetectionAgent:
 
         # Run all three deterministic rules (no history needed)
         findings.append(check_amount_mismatch(extraction))
-        findings.append(
-            check_round_number_bias(
-                extraction, approval_threshold=Decimal("5000")
-            )
-        )
+        findings.append(check_round_number_bias(extraction, approval_threshold=Decimal("5000")))
         findings.append(check_date_anomalies(extraction))
 
         # Separate flagged findings from clean results

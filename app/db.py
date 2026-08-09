@@ -1,6 +1,7 @@
 """Database connection and session management."""
 
 import os
+from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,7 +27,7 @@ SessionLocal = sessionmaker(
 )
 
 
-def get_db() -> Session:
+def get_db() -> Generator[Session, None, None]:
     """
     Dependency function for FastAPI routes.
     Usage: @app.get("/") def my_route(db: Session = Depends(get_db)): ...

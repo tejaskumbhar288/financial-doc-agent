@@ -1,12 +1,18 @@
 """AnomalyFlag model — audit trail of detected anomalies."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.document import ExtractedDocument  # noqa: F401
 
 
 class AnomalySeverity(StrEnum):

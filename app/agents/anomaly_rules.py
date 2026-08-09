@@ -51,10 +51,14 @@ def check_amount_mismatch(extraction: InvoiceExtraction | ReceiptExtraction) -> 
         )
 
     # Use net_worth (pre-tax line subtotal) for invoices, or generic amount field for receipts
-    line_sum = sum(
-        getattr(item, "net_worth", None) or getattr(item, "amount", Decimal("0"))
-        for item in extraction.line_items
-    )
+    def get_line_amount(item):  # type: ignore[no-untyped-def]
+        """Extract the monetary amount from a line item."""
+        net_worth = getattr(item, "net_worth", None)
+        if net_worth is not None:
+            return net_worth
+        return getattr(item, "amount", Decimal("0"))
+
+    line_sum = sum(get_line_amount(item) for item in extraction.line_items)
 
     # Determine schema type and check accordingly
     subtotal_mismatch = False
@@ -80,7 +84,9 @@ def check_amount_mismatch(extraction: InvoiceExtraction | ReceiptExtraction) -> 
             if subtotal is not None:
                 tax_amt = tax or Decimal("0.00")
                 calculated_total = subtotal + tax_amt
-                mismatch_type.append(f"subtotal + tax (${calculated_total}) ≠ total (${extraction.total})")
+                mismatch_type.append(
+                    f"subtotal + tax (${calculated_total}) ≠ total (${extraction.total})"
+                )
             else:
                 mismatch_type.append(f"line items (${line_sum}) ≠ total (${extraction.total})")
 
@@ -143,9 +149,9 @@ def check_round_number_bias(
 
     # Flag if amount is in the suspicious zone (between lower_bound and threshold)
     if lower_bound < extraction.total < approval_threshold:
-        pct_below = (
-            (approval_threshold - extraction.total) / approval_threshold * 100
-        ).quantize(Decimal("0.01"))
+        pct_below = ((approval_threshold - extraction.total) / approval_threshold * 100).quantize(
+            Decimal("0.01")
+        )
 
         return AnomalyResult(
             rule_name="round_number_bias",

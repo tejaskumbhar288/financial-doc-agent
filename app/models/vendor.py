@@ -1,12 +1,18 @@
 """Vendor model — tracks vendor history for anomaly detection."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.document import ExtractedDocument  # noqa: F401
 
 
 class Vendor(Base):
