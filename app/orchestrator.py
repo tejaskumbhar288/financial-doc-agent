@@ -2,9 +2,12 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy.orm import Session
 
+from app.agents.anomaly_detection_agent import AnomalyDetectionAgent
 from app.agents.extract_receipt import extract_receipt_with_retry
 from app.agents.guard_agent import GuardAgentResult, run_guard
+from app.db import SessionLocal
 from app.schemas.base import ProcessingStatus
 from app.schemas.receipt import ReceiptExtraction
 
@@ -16,6 +19,7 @@ class PipelineState(TypedDict):
     raw_text: str
     guard_result: GuardAgentResult | None
     extraction_result: ReceiptExtraction | None
+    anomaly_result: dict | None
     status: ProcessingStatus | None
 
 
@@ -80,8 +84,8 @@ def extraction_node(state: PipelineState) -> dict:
     unredacted PII at this point in the pipeline.
 
     Unlike guard_node, this sets `status` directly instead of deferring it
-    to a routing decision: there's no further conditional edge after
-    Extraction in this graph, so there's nothing to defer to.
+    to a routing decision: there's a conditional edge after
+    Extraction (to anomaly detection or END).
     """
     # Same reasoning as the assert in route_after_guard: guard_result is
     # only None before guard_node runs, and this node is only ever wired
@@ -95,27 +99,47 @@ def extraction_node(state: PipelineState) -> dict:
     return {"extraction_result": result, "status": status}
 
 
+def anomaly_detection_node(state: PipelineState) -> dict:
+    """
+    Anomaly Detection Agent node: run deterministic anomaly rules.
+
+    Runs only if extraction succeeded (status=PROCESSED). If extraction
+    failed (status=NEEDS_REVIEW), skips anomaly detection since there's
+    no valid data to check.
+    """
+    assert state["extraction_result"] is not None, (
+        "anomaly_detection_node called without extraction result"
+    )
+
+    # Initialize agent with a database session (for later persistence)
+    db: Session = SessionLocal()
+    agent = AnomalyDetectionAgent(db)
+
+    # Run all anomaly rules
+    result = agent.run(state["extraction_result"])
+
+    return {"anomaly_result": result}
+
+
 def build_graph() -> CompiledStateGraph:
     """
-    Wires the four node/edge pieces above into an actual runnable graph.
+    Wires the nodes/edges into an actual runnable graph.
 
-    Shape (mirrors ARCHITECTURE.md Section 3's diagram, minus the
-    Anomaly Detection node — that's Checkpoint 9):
+    Shape (mirrors ARCHITECTURE.md Section 3's diagram):
 
-        START -> guard -> (route_after_guard) -> quarantine  -> END
-                                               -> extraction -> END
+        START -> guard -> (route_after_guard) -> quarantine        -> END
+                                               -> extraction -> anomaly_detection -> END
 
-    add_conditional_edges' third argument is the path_map: it maps the
-    plain string keys route_after_guard returns ("quarantine",
-    "extraction") to the actual node names to run next. That indirection
-    is what let route_after_guard stay ignorant of the graph's structure
-    when we wrote it.
+    The anomaly_detection node runs only if extraction succeeded
+    (status=PROCESSED). If extraction failed, the document goes directly
+    to END (and will be in the review queue for human triage).
     """
     graph = StateGraph(PipelineState)
 
     graph.add_node("guard", guard_node)
     graph.add_node("quarantine", quarantine_node)
     graph.add_node("extraction", extraction_node)
+    graph.add_node("anomaly_detection", anomaly_detection_node)
 
     graph.add_edge(START, "guard")
     graph.add_conditional_edges(
@@ -124,7 +148,8 @@ def build_graph() -> CompiledStateGraph:
         {"quarantine": "quarantine", "extraction": "extraction"},
     )
     graph.add_edge("quarantine", END)
-    graph.add_edge("extraction", END)
+    graph.add_edge("extraction", "anomaly_detection")
+    graph.add_edge("anomaly_detection", END)
 
     return graph.compile()
 
@@ -146,12 +171,15 @@ if __name__ == "__main__":
                 "raw_text": raw_text,
                 "guard_result": None,
                 "extraction_result": None,
+                "anomaly_result": None,
                 "status": None,
             }
         )
         print(f"status: {result['status']}")
         if result["extraction_result"] is not None:
             print(result["extraction_result"].model_dump_json(indent=2))
+        if result["anomaly_result"] is not None:
+            print(f"anomalies: {result['anomaly_result']['flagged_count']} flagged")
 
     run("Clean receipt", RAW_RECEIPT_TEXT, "X00016469612.jpg")
 
