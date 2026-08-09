@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from enum import StrEnum
 
 from app.models.anomaly import AnomalySeverity
 from app.schemas.invoice import InvoiceExtraction
@@ -13,22 +12,22 @@ from app.schemas.receipt import ReceiptExtraction
 @dataclass
 class AnomalyResult:
     """Result of running a single anomaly detection rule."""
-    
+
     rule_name: str
     """Name of the rule that ran (e.g., 'amount_mismatch')."""
-    
+
     flagged: bool
     """Whether this rule detected an anomaly."""
-    
+
     severity: AnomalySeverity | None
     """Severity level (CRITICAL/HIGH/MEDIUM/LOW) if flagged, None if not."""
-    
+
     description: str | None
     """Human-readable explanation if flagged, None otherwise."""
-    
+
     details: dict | None
     """Rule-specific details as a dict (e.g., {line_sum: 100, reported_total: 120})."""
-    
+
     confidence: float
     """Confidence in this result (0.0-1.0). 1.0 = deterministic, 0.5 = borderline."""
 

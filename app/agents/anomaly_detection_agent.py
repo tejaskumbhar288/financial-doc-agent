@@ -5,13 +5,11 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.agents.anomaly_rules import (
-    AnomalyResult,
     check_amount_mismatch,
-    check_round_number_bias,
     check_date_anomalies,
+    check_round_number_bias,
 )
 from app.models.anomaly import AnomalyFlag, AnomalySeverity
-from app.models.document import ExtractedDocument
 from app.schemas.invoice import InvoiceExtraction
 from app.schemas.receipt import ReceiptExtraction
 

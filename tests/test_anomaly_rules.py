@@ -7,13 +7,12 @@ import pytest
 
 from app.agents.anomaly_rules import (
     check_amount_mismatch,
-    check_round_number_bias,
     check_date_anomalies,
+    check_round_number_bias,
 )
 from app.models.anomaly import AnomalySeverity
 from app.schemas.invoice import InvoiceExtraction, InvoiceLineItem
 from app.schemas.receipt import ReceiptExtraction
-
 
 # ============================================================================
 # Fixtures
