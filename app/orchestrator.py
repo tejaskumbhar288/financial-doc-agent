@@ -107,7 +107,9 @@ def anomaly_detection_node(state: PipelineState) -> dict:
     failed (status=NEEDS_REVIEW), skips anomaly detection since there's
     no valid data to check.
     """
-    assert state["extraction_result"] is not None, "anomaly_detection_node called without extraction result"
+    assert state["extraction_result"] is not None, (
+        "anomaly_detection_node called without extraction result"
+    )
 
     # Initialize agent with a database session (for later persistence)
     db: Session = SessionLocal()
