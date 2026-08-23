@@ -8,6 +8,7 @@ import pytest
 from app.agents.anomaly_rules import (
     check_amount_mismatch,
     check_date_anomalies,
+    check_duplicate_line_items,
     check_round_number_bias,
 )
 from app.models.anomaly import AnomalySeverity
@@ -519,3 +520,79 @@ def test_date_anomalies_weekend(receipt_weekend_dated):
     assert result.severity == AnomalySeverity.LOW
     assert "saturday" in result.description.lower() or "sunday" in result.description.lower()
     assert result.details["is_weekend"] is True
+
+
+# ============================================================================
+# check_duplicate_line_items
+# ============================================================================
+
+
+def _line(description: str, net_worth: str) -> InvoiceLineItem:
+    """Build a line item; only description and net_worth matter to this rule."""
+    return InvoiceLineItem(
+        description=description,
+        quantity=Decimal("1"),
+        unit_of_measure="each",
+        net_price=Decimal(net_worth),
+        net_worth=Decimal(net_worth),
+        vat_percent=Decimal("0"),
+        gross_worth=Decimal(net_worth),
+    )
+
+
+def _invoice(*line_items: InvoiceLineItem) -> InvoiceExtraction:
+    total = sum((item.net_worth for item in line_items), Decimal("0"))
+    return InvoiceExtraction(
+        source_filename="dupes.pdf",
+        confidence_score=0.9,
+        vendor_name="Acme Corp",
+        client_name="Example Inc",
+        invoice_number="INV-DUP-001",
+        invoice_date=date(2024, 8, 1),
+        line_items=list(line_items),
+        subtotal=total,
+        tax=Decimal("0"),
+        total=total,
+    )
+
+
+def test_flags_an_exact_duplicate_line():
+    invoice = _invoice(
+        _line("Consulting fee", "1200"),
+        _line("Consulting fee", "1200"),
+        _line("Travel", "300"),
+    )
+
+    result = check_duplicate_line_items(invoice)
+
+    assert result.flagged is True
+    assert result.severity == AnomalySeverity.HIGH
+    assert "consulting fee" in result.description
+
+
+def test_duplicate_detection_ignores_casing_and_padding():
+    invoice = _invoice(_line("Consulting Fee", "1200"), _line("  consulting fee ", "1200"))
+
+    assert check_duplicate_line_items(invoice).flagged is True
+
+
+def test_same_description_at_a_different_price_is_not_a_duplicate():
+    """Two site visits at different rates are legitimate, not double billing."""
+    invoice = _invoice(_line("Site visit", "500"), _line("Site visit", "750"))
+
+    assert check_duplicate_line_items(invoice).flagged is False
+
+
+def test_a_clean_invoice_is_not_flagged():
+    invoice = _invoice(_line("Widget A", "200"), _line("Widget B", "150"))
+
+    result = check_duplicate_line_items(invoice)
+
+    assert result.flagged is False
+    assert result.severity is None
+
+
+def test_shipping_repeats_are_ignored_by_default():
+    invoice = _invoice(_line("Shipping", "50"), _line("Shipping", "50"))
+
+    assert check_duplicate_line_items(invoice).flagged is False
