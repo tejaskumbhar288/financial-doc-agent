@@ -247,3 +247,86 @@ def check_date_anomalies(
         details=None,
         confidence=1.0,
     )
+
+
+def check_duplicate_line_items(
+    extraction: InvoiceExtraction | ReceiptExtraction,
+    ignored_descriptions: list[str] = [],
+) -> AnomalyResult:
+    """
+    Check for duplicate line items on the same document.
+
+    Duplicate billing is one of the most common invoice frauds: the same
+    service is listed twice, often with slightly different casing, so the
+    total looks plausible while the buyer pays twice.
+
+    Args:
+        extraction: The extracted document to check
+        ignored_descriptions: Descriptions to skip, e.g. legitimate repeats
+            like "Shipping" that can appear once per parcel
+
+    Returns:
+        AnomalyResult with severity HIGH when duplicates are found
+    """
+    if extraction.line_items is None:
+        return AnomalyResult(
+            rule_name="duplicate_line_items",
+            flagged=False,
+            severity=None,
+            description=None,
+            details=None,
+            confidence=1.0,
+        )
+
+    def get_line_amount(item):  # type: ignore[no-untyped-def]
+        """Extract the monetary amount from a line item."""
+        net_worth = getattr(item, "net_worth", None)
+        if net_worth is not None:
+            return net_worth
+        return getattr(item, "amount", Decimal("0"))
+
+    # Normalise so "Consulting fee" and "consulting fee " collide.
+    for skip in ("shipping", "freight"):
+        if skip not in ignored_descriptions:
+            ignored_descriptions.append(skip)
+
+    seen: dict[str, Decimal] = {}
+    duplicates: list[str] = []
+
+    for item in extraction.line_items:
+        description = (getattr(item, "description", None) or "").strip().lower()
+        if not description or description in ignored_descriptions:
+            continue
+
+        amount = get_line_amount(item)
+        if description in seen and seen[description] == amount:
+            duplicates.append(description)
+        seen[description] = amount
+
+    if not duplicates:
+        return AnomalyResult(
+            rule_name="duplicate_line_items",
+            flagged=False,
+            severity=None,
+            description=None,
+            details=None,
+            confidence=1.0,
+        )
+
+    duplicate_value = sum(seen[d] for d in duplicates)
+
+    return AnomalyResult(
+        rule_name="duplicate_line_items",
+        flagged=True,
+        severity=AnomalySeverity.HIGH,
+        description=(
+            f"{len(duplicates)} duplicate line item(s) worth {duplicate_value}: "
+            f"{', '.join(duplicates)}"
+        ),
+        details={
+            "duplicates": duplicates,
+            "duplicate_value": str(duplicate_value),
+            "line_item_count": len(extraction.line_items),
+        },
+        confidence=len(duplicates) / len(extraction.line_items),
+    )

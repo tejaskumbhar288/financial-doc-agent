@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.agents.anomaly_rules import (
     check_amount_mismatch,
     check_date_anomalies,
+    check_duplicate_line_items,
     check_round_number_bias,
 )
 from app.models.anomaly import AnomalyFlag, AnomalySeverity
@@ -50,6 +51,7 @@ class AnomalyDetectionAgent:
         findings.append(check_amount_mismatch(extraction))
         findings.append(check_round_number_bias(extraction, approval_threshold=Decimal("5000")))
         findings.append(check_date_anomalies(extraction))
+        findings.append(check_duplicate_line_items(extraction))
 
         # Separate flagged findings from clean results
         flagged_findings = [f for f in findings if f.flagged]
