@@ -251,7 +251,7 @@ def check_date_anomalies(
 
 def check_duplicate_line_items(
     extraction: InvoiceExtraction | ReceiptExtraction,
-    ignored_descriptions: list[str] = [],
+    ignored_descriptions: list[str] | None = None,
 ) -> AnomalyResult:
     """
     Check for duplicate line items on the same document.
@@ -285,17 +285,16 @@ def check_duplicate_line_items(
             return net_worth
         return getattr(item, "amount", Decimal("0"))
 
-    # Normalise so "Consulting fee" and "consulting fee " collide.
-    for skip in ("shipping", "freight"):
-        if skip not in ignored_descriptions:
-            ignored_descriptions.append(skip)
+    # Shipping and freight legitimately repeat, once per parcel.
+    skip_list = list(ignored_descriptions or [])
+    skip_list.extend(("shipping", "freight"))
 
     seen: dict[str, Decimal] = {}
     duplicates: list[str] = []
 
     for item in extraction.line_items:
         description = (getattr(item, "description", None) or "").strip().lower()
-        if not description or description in ignored_descriptions:
+        if not description or description in skip_list:
             continue
 
         amount = get_line_amount(item)
